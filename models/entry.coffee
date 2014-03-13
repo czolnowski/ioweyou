@@ -7,10 +7,10 @@ module.exports =
     getById(id, next)
   getUserEntryById: (userId, entryId, next) ->
     getUserEntryById(userId, entryId, next)
-  getAll: (id, filters, next) ->
-    getAll(id, filters, next)
-  getSummary: (userId, next) ->
-    getSummary(userId, next)
+  getAll: (userId, filters, next) ->
+    getAll(userId, filters, next)
+  getSummary: (userId, filters, next) ->
+    getSummary(userId, filters, next)
   getCount: (userId, filters, next) ->
     getCount(userId, filters, next)
   create: (fields, next) ->
@@ -26,6 +26,7 @@ module.exports =
 
 
 getEntryQuery = ()->
+
   db.postgres()
     .from('entry')
     .select(
@@ -102,6 +103,7 @@ getCount = (userId, filters, next) ->
   query = db.postgres()
     .from('entry')
     .count('id')
+    .where('status', '!=', 3)
     .where (sub) ->
       sub.where('debtor_id', userId)
         .orWhere('lender_id', userId)
@@ -129,16 +131,51 @@ getCount = (userId, filters, next) ->
       else
         next(false)
 
-getAll = (id, filters, next) ->
+getAll = (userId, filters, next) ->
 
   query = getEntryQuery()
     .where (sub) ->
-      sub.where('debtor_id', id)
-        .orWhere('lender_id', id)
+      sub.where('debtor_id', userId)
+        .orWhere('lender_id', userId)
     .where('status', '!=', 3)
-    .limit(filters.limit or 10)
+    .limit(filters.limit or 8)
     .offset(filters.offset or 0)
     .orderBy('created_at', filters.order or 'desc')
+
+  if filters.from
+    query.where('entry.created_at', '>',  moment(filters.from).toISOString())
+
+  if filters.to
+    query.where('entry.created_at', '<', moment(filters.to).toISOString())
+
+  if filters.contractor
+    query.where (sub) ->
+      sub.where('debtor_id', filters.contractor)
+        .orWhere('lender_id', filters.contractor)
+
+  if filters.status
+    query.where('status', '=', filters.status)
+
+  if filters.name
+    query.where('name', 'ilike', '%'+filters.name+'%')
+
+  query.exec (error, reply) ->
+    if not error
+      next(reply)
+    else
+      next(false)
+
+
+
+getSummary = (userId, filters, next) ->
+
+  query = db.postgres()
+    .from('entry')
+    .select('entry.value', 'entry.lender_id', 'entry.debtor_id')
+    .where('entry.status', '=', '1')
+    .where (sub) ->
+      sub.where('debtor_id', userId)
+        .orWhere('lender_id', userId)
 
   if filters.from
     query.where('created_at', '>',  moment(filters.from).toISOString())
@@ -158,35 +195,19 @@ getAll = (id, filters, next) ->
     query.where('name', 'ilike', '%'+filters.name+'%')
 
   query.exec (error, reply) ->
-      if not error
-        next(reply)
-      else
-        next(false)
+    if not error
+      summary = 0.0
+      i = 0
+      for row in reply
+        if row.debtor_id is Number(userId)
+          summary = parseFloat(summary) - parseFloat(row.value)
+        if row.lender_id is Number(userId)
+          summary = parseFloat(summary) + parseFloat(row.value)
+        i = i + 1
 
-
-getSummary = (userId, next) ->
-
-  db.postgres()
-    .from('entry')
-    .select('entry.*')
-    .where('entry.status', '=', '1')
-    .where (sub) ->
-      sub.where('debtor_id', userId)
-        .orWhere('lender_id', userId)
-    .exec (error, reply) ->
-      if not error
-        summary = 0.0
-        i = 0
-        for row in reply
-          if row.debtor_id.toString() is userId
-            summary = parseFloat(summary) - parseFloat(row.value)
-          if row.lender_id.toString() is userId
-            summary = parseFloat(summary) + parseFloat(row.value)
-          i = i + 1
-
-        next(JSON.stringify({"summary": summary.toFixed(2)}))
-      else
-        next(false)
+      next error, summary.toFixed(2)
+    else
+      next error, null
 
 
 accept = (userId, entryId, next) ->

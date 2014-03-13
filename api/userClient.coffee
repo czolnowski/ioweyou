@@ -3,7 +3,7 @@ auth = require '../lib/auth'
 clientTable = require '../models/userClient'
 
 module.exports = (app) ->
-  app.post '/api/user-client/add-or-create', auth.tokenAuth, addOrCreate
+  app.post '/user-client/add-or-create', auth.tokenAuth, addOrCreate
 
 addOrCreate = (req, res) ->
   req.assert('name', 'Invalid device name').notEmpty()
@@ -29,6 +29,5 @@ addOrCreate = (req, res) ->
           res.status(statusCode).send {isCreated: isCreated}
 
   else
-    console.log req.validationErrors()
     res.send(400).send()
 

@@ -3,6 +3,7 @@ config = require '../config'
 auth = require '../lib/auth'
 entryTable = require '../models/entry'
 userTable = require '../models/user'
+userFriendshipTable = require '../models/userFriendship'
 userManager = require '../managers/user'
 clientTable = require '../models/userClient'
 session = require '../models/session'
@@ -10,42 +11,28 @@ session = require '../models/session'
 
 module.exports = (app) ->
   #GET
-  app.get '/api/entry', auth.tokenAuth, list
-  app.get '/api/entry/summary', auth.tokenAuth, summary
-  app.get '/api/entry/count', auth.tokenAuth, count
-  app.get '/api/entry/:id', auth.tokenAuth, one
+  app.get '/entry', auth.tokenAuth, filters, list
+  app.get '/entry/summary', auth.tokenAuth, filters, summary
+  app.get '/entry/count', auth.tokenAuth, filters, count
+  app.get '/entry/:id', auth.tokenAuth, one
   #PUT
-  app.put '/api/entry',auth.tokenAuth, create
+  app.put '/entry',auth.tokenAuth, create
   #POST
-  app.post '/api/entry/:id', auth.tokenAuth, modify
-  app.post '/api/entry/accept/:id', auth.tokenAuth, accept
-  app.post '/api/entry/reject/:id', auth.tokenAuth, reject
+  app.post '/entry/:id', auth.tokenAuth, modify
+  app.post '/entry/accept/:id', auth.tokenAuth, accept
+  app.post '/entry/reject/:id', auth.tokenAuth, reject
   #DELETE
-  app.delete '/api/entry/:id', auth.tokenAuth, remove
-
-one = (req, res) ->
-  req.assert('id', 'Invalid entry ID').notEmpty().isInt()
-
-  if not req.validationErrors()
-    entryId = req.params.id
-    userId = req.query.uid
-
-    entryTable.getUserEntryById userId, entryId, (entry) ->
-      if entry
-        res.header "Content-Type", "application/json"
-        res.send(entry)
-      else
-        res.status(404).send()
-  else
-    res.status(404).send()
+  app.delete '/entry/:id', auth.tokenAuth, remove
 
 
-list = (req, res) ->
+filters = (req, res, next) ->
+
+  res.locals.filters = {}
 
   if req.query.limit
     req.assert('limit', {
-      max: 'Maximum value is 100.',
-      isInt: 'Integer expected.'
+    max: 'Maximum value is 100.',
+    isInt: 'Integer expected.'
     }).max(100).isInt()
 
   if req.query.offset
@@ -66,8 +53,10 @@ list = (req, res) ->
   if req.query.order
     req.assert('order', 'Invalid order format. Expected asc or desc.').isIn(['asc', 'desc'])
 
-  if not req.validationErrors()
-    filters =
+  if req.validationErrors()
+    res.status(404).send(req.validationErrors())
+  else
+    res.locals.filters =
       limit: req.query.limit
       offset: req.query.offset
       from: Number(req.query.from)
@@ -77,56 +66,48 @@ list = (req, res) ->
       order: req.query.order
       name: req.query.name
 
-    entryTable.getAll req.query.uid, filters, (entries) ->
-      if entries
-        res.header "Content-Type", "application/json"
-        res.send(entries)
-      else
-        res.status(404).send()
-  else
-    res.status(404).send(req.validationErrors())
+    next()
 
-summary = (req, res) ->
-  entryTable.getSummary req.query.uid, (summary) ->
-    if summary
+one = (req, res) ->
+  req.assert('id', 'Invalid entry ID').notEmpty().isInt()
+
+  if not req.validationErrors()
+    entryId = req.params.id
+    userId = req.query.uid
+
+    entryTable.getUserEntryById userId, entryId, (entry) ->
+      if entry
+        res.header "Content-Type", "application/json"
+        res.send(entry)
+      else
+        res.status(404).send("Not Found.")
+  else
+    res.status(400).send()
+
+list = (req, res) ->
+  entryTable.getAll req.query.uid, res.locals.filters, (entries) ->
+    if entries
       res.header "Content-Type", "application/json"
-      res.send(summary)
+      res.send(entries)
     else
       res.status(404).send()
 
+summary = (req, res) ->
+  console.log(res.locals.filters);
+  entryTable.getSummary req.query.uid, res.locals.filters, (error, summary) ->
+    if not error
+      res.header "Content-Type", "application/json"
+      res.send JSON.stringify({summary: summary})
+    else
+      res.status(404).send("Not Found.")
+
 count = (req, res) ->
-
-  if req.query.from
-    req.assert('from', 'Invalid from date format. Expected POSIX time').isInt()
-
-  if req.query.to
-    req.assert('to', 'Invalid from date format. Expected POSIX time').isInt()
-
-  if req.query.contractor
-    req.assert('contractor', 'Invalid contractor format. Expected integer.').isInt()
-
-  if req.query.status
-    req.assert('status', 'Invalid status format. Expected integer.').isInt()
-
-  if not req.validationErrors()
-    filters =
-      limit: req.query.limit
-      offset: req.query.offset
-      from: Number(req.query.from)
-      to: Number(req.query.to)
-      contractor: req.query.contractor
-      status: req.query.status
-      order: req.query.order
-      name: req.query.name
-
-    entryTable.getCount req.query.uid, filters, (count) ->
-      if count
-        res.header "Content-Type", "application/json"
-        res.send(count)
-      else
-        res.status(404).send()
-  else
-    res.status(404).send(req.validationErrors())
+  entryTable.getCount req.query.uid, res.locals.filters, (count) ->
+    if count
+      res.header "Content-Type", "application/json"
+      res.send(count)
+    else
+      res.status(404).send("Not Found.")
 
 create = (req, res) ->
   req.checkBody('name', 'Nazwa nie może być pusta.').notEmpty()
@@ -142,13 +123,7 @@ create = (req, res) ->
     description = req.body.description
     value = req.body.value / (contractors.length + parseInt(req.body.includeMe))
 
-    console.log req.body.value
-    console.log contractors.length
-    console.log contractors.length + req.body.includeMe
-    console.log req.body.includeMe
-    console.log value
-
-    userTable.friendshipsExists userId, contractors, (exists) ->
+    userFriendshipTable.friendshipsExists userId, contractors, (exists) ->
       if exists
         for contractor in contractors
           userTable.getById contractor, (dbContractor) =>
@@ -188,13 +163,13 @@ create = (req, res) ->
                     }, (error) ->
 
             else
-              res.status(404).send()
+              res.status(404).send("Not Found.")
 
           res.status(200).send {isCreated: true}
       else
-        res.status(404).send()
+        res.status(404).send("Not Found.")
   else
-    res.status(404).send(req.validationErrors(true))
+    res.status(400).send(req.validationErrors(true))
 
 
 accept = (req, res) ->
@@ -227,7 +202,7 @@ accept = (req, res) ->
 
       res.status(statusCode).send {isModified: isModified}
   else
-    res.status(404).send()
+    res.status(400).send()
 
 
 reject = (req, res) ->
@@ -274,7 +249,7 @@ remove = (req, res) ->
     entryTable.remove userId, entryId, (statusCode, isModified) ->
       res.status(statusCode).send {isModified: isModified}
   else
-    res.status(404).send()
+    res.status(400).send()
 
 
 modify = (req, res) ->

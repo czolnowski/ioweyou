@@ -12,18 +12,16 @@ app.set('views', __dirname + '/views')
 app.set('view engine', 'jade')
 
 app.use express.bodyParser()
-app.use '/public/', express.static(__dirname + '/public')
 app.use expressValidator({
   errorFormatter: validator.errorFormatter
 })
 
 mailer.extend app, config.mailer
-apn.extend app, config.apn
+
+if config.apn.env in ["prod", "dev"]
+  apn.extend app, config.apn
 
 require('./api/entry')(app)
 require('./api/auth')(app)
 require('./api/user')(app)
 require('./api/userClient')(app)
-
-app.get '/', (req, res)->
-  res.sendfile './public/index.html'
